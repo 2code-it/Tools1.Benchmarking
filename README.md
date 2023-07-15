@@ -45,5 +45,5 @@ Console.WriteLine(string.Join("\r\n", lines));
 ```
 
 ## 3. Output
-BenchThis1  508
+BenchThis1  508  
 BenchThis2  1011
