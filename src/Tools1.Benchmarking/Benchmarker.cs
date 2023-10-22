@@ -1,88 +1,154 @@
-﻿using System.Diagnostics;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.SymbolStore;
+using System.Linq;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+using Tools1.Benchmarking.Internals;
 
 namespace Tools1.Benchmarking
 {
-	public static class Benchmarker
+	public class Benchmarker : IBenchmarker
 	{
-		private const string _setupMethodName = "Setup";
-		private const string _cleanupMethodName = "Cleanup";
-
-		public static IDictionary<string, List<long>> Run<T>(T source, int passes = 1)
+		public Benchmarker() : this(null) { }
+		public Benchmarker(BenchmarkerOptions? options) : this(options, new ProcessInfoService()) { }
+		internal Benchmarker(BenchmarkerOptions? options, IProcessInfoService processInfoService)
 		{
-			if (source is null) throw new InvalidOperationException("Source is null");
-			return Run(typeof(T), source, passes);
+			_processInfoService = processInfoService;
+			if (!(options is null)) MapOptions(options, _options);
 		}
 
-		public static IDictionary<string, List<long>> Run<T>(int passes = 1)
+		private IProcessInfoService _processInfoService;
+		private Stopwatch _stopwatch = new Stopwatch();
+		private readonly string[] _excludedMethodNames = typeof(object).GetMethods().Select(x => x.Name).ToArray();
+		private readonly PropertyInfo[] _optionsProperties = typeof(BenchmarkerOptions).GetProperties().Where(x => x.CanWrite && !(x.GetSetMethod() is null)).ToArray();
+		private BenchmarkerOptions _options = CreateDefaultOptions();
+
+		public event EventHandler<BenchmarkResultEventArgs>? BenchmarkCompleted;
+		public event EventHandler<UnhandledExceptionEventArgs>? Error;
+
+		public Benchmarker Configure(Action<BenchmarkerOptions> optionsAction)
 		{
-			return Run(typeof(T), passes);
+			var options = CreateDefaultOptions();
+			optionsAction(options);
+			MapOptions(options, _options);
+			return this;
 		}
 
-		public static IDictionary<string, List<long>> Run(Type benchType, int passes = 1)
+		public bool CanRun(Type type)
+			=> type.IsClass && !type.IsGenericType && type.GetConstructors().Any(x => x.GetParameters().Length == 0);
+	
+		public async Task<BenchmarkResult[]> RunAsync(Type type, CancellationToken? cancellationToken = null)
 		{
-			object? instance = Activator.CreateInstance(benchType);
-			if (instance == null) throw new InvalidOperationException($"Can't create an instance of {benchType.Name}");
-			return Run(benchType, instance, passes);
-		}
+			object? source = Activator.CreateInstance(type);
+			if (source is null) throw new ArgumentException($"Can't create instance of {type.Name}", nameof(type));
 
-		public static IDictionary<string, List<long>> Run(Type benchType, object source, int passes = 1)
-		{
-			RunSetup(source);
+			MethodInfo[] benchMethods = type.GetMethods().Where(BenchmarkMethodFilter).ToArray();
 
-			string[] excludedMethodNames = typeof(object).GetMethods().Select(x => x.Name).Union(new[] { _setupMethodName, _cleanupMethodName }).ToArray();
-			MethodInfo[] benchMethods = benchType.GetMethods().Where(x => x.IsPublic && !x.GetParameters().Any() && !excludedMethodNames.Contains(x.Name)).ToArray();
+			var runInfos = benchMethods.SelectMany(m => GetBenchmarkRunInfo(m, _options.InvocationCount, source, type)).ToArray();
+			if (_options.OrderRunByInvocationNumber) runInfos = runInfos.OrderBy(x => x.invocationNumber).ToArray();
 
-			IDictionary<string, List<long>> results = benchMethods.ToDictionary(x => x.Name, y => new List<long>());
-			Stopwatch stopWatch = new Stopwatch();
-
-			for (int i = 1; i <= passes; i++)
+			BenchmarkResult[] results = new BenchmarkResult[runInfos.Length];
+			int i = 0;
+			do
 			{
-				foreach (MethodInfo method in benchMethods)
-				{
-					stopWatch.Restart();
-					method.Invoke(source, null);
-					stopWatch.Stop();
-					results[method.Name].Add(stopWatch.ElapsedMilliseconds);
-				}
+				results[i] = await RunAsync(runInfos[i].action, runInfos[i].id, runInfos[i].invocationNumber, cancellationToken);
+				if (_options.StopOnFailure && results[i].Failed) break;
 			}
+			while (++i < runInfos.Length);
 
-			RunCleanup(source);
-			return results;
+			return results.Take(i+1).ToArray();
 		}
 
-		public static async Task<IDictionary<string, List<long>>> RunAsync<T>(T source, int passes = 1)
+		public async Task<BenchmarkResult> RunAsync(Action action, string? identifier = null, int invocationNumber = 1, CancellationToken? cancellationToken = null)
 		{
-			return await Task.Run(() => Run<T>(source, passes));
+			long ticksPerMicrosecond = TimeSpan.TicksPerMillisecond / 1000;
+
+			BenchmarkResult result = CreateNewResult(identifier);
+			_stopwatch.Restart();
+			_processInfoService.Reset();
+
+			bool success = await TryRunActionAsync(action, cancellationToken);
+
+			_stopwatch.Stop();
+			result.Failed = !success;
+			result.InvocationNumber = invocationNumber;
+			result.Duration = _stopwatch.ElapsedTicks / ticksPerMicrosecond;
+			result.TotalProcessorTime = _processInfoService.GetTotalProcessorTicks() / ticksPerMicrosecond;
+			result.TotalAllocatedBytes = _processInfoService.GetTotalAllocatedBytes();
+
+			OnBenchmarkCompleted(result);
+			return result;
 		}
 
-		public static async Task<IDictionary<string, List<long>>> RunAsync<T>(int passes = 1)
+		public async Task<BenchmarkResult[]> RunAsync<T>(CancellationToken? cancellationToken = null)
+			=> await RunAsync(typeof(T), cancellationToken);
+
+		public static BenchmarkerOptions CreateDefaultOptions()
+			=> new BenchmarkerOptions { InvocationCount = 1 };
+
+		public static Benchmarker CreateWith(Action<BenchmarkerOptions> optionsAction)
+			=> new Benchmarker().Configure(optionsAction);
+
+
+		private (string id, Action action, int invocationNumber)[] GetBenchmarkRunInfo(MethodInfo method, int invocationCount, object source, Type type)
+			=> Enumerable.Range(1, invocationCount)
+				.Select(i => ($"{type.Name}.{method.Name}", (Action)Delegate.CreateDelegate(typeof(Action), source, method), i))
+				.ToArray();
+
+		private void MapOptions(BenchmarkerOptions optionsSource, BenchmarkerOptions optionsDestination)
 		{
-			return await Task.Run(() => Run<T>(passes));
+			foreach(var property in _optionsProperties)
+			{
+				property.SetValue(optionsDestination, property.GetValue(optionsSource));
+			}
 		}
 
-		public static async Task<IDictionary<string, List<long>>> RunAsync(Type benchType, int passes = 1)
+		private bool BenchmarkMethodFilter(MethodInfo method)
+			=> !method.IsSpecialName
+				&& method.IsPublic
+				&& !method.GetParameters().Any()
+				&& !_excludedMethodNames.Contains(method.Name);
+		
+		private BenchmarkResult CreateNewResult(string? identifier, int invocationNumber = 1)
 		{
-			return await Task.Run(() => Run(benchType, passes));
+			BenchmarkResult result = new BenchmarkResult();
+			result.Created = DateTime.Now;
+			result.Identifier = identifier;
+			result.InvocationNumber = invocationNumber;
+			return result;
 		}
 
-		public static async Task<IDictionary<string, List<long>>> RunAsync(Type benchType, object source, int passes = 1)
+		private async Task<bool> TryRunActionAsync(Action action, CancellationToken? cancellationToken)
 		{
-			return await Task.Run(() => Run(benchType, source, passes));
+			try
+			{
+				await Task.Run(action, cancellationToken ?? CancellationToken.None);
+				return true;
+			}
+			catch(AggregateException ae)
+			{
+				OnError(ae.InnerException);
+			}
+			catch (Exception ex)
+			{
+				OnError(ex);
+			}
+			return false;
 		}
 
-		private static void RunSetup<T>(T source)
+		private void OnBenchmarkCompleted(BenchmarkResult result)
 		{
-			MethodInfo? method = typeof(T).GetMethods().FirstOrDefault(x => x.Name == _setupMethodName);
-			if (method is null) return;
-			method.Invoke(source, null);
+			BenchmarkCompleted?.Invoke(this, new BenchmarkResultEventArgs(result));
 		}
 
-		private static void RunCleanup<T>(T source)
+		private void OnError(Exception? exception)
 		{
-			MethodInfo? method = typeof(T).GetMethods().FirstOrDefault(x => x.Name == _cleanupMethodName);
-			if (method is null) return;
-			method.Invoke(source, null);
+			if (exception is null) return;
+			if (Error is null) throw exception;
+			Error.Invoke(this, new UnhandledExceptionEventArgs(exception, false));
 		}
 	}
 }

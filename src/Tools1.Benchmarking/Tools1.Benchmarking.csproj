@@ -1,9 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFrameworks>netstandard2.1;net5.0;net6.0</TargetFrameworks>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+
+		<Title>$(AssemblyName)</Title>
+		<Authors>2code</Authors>
+		<PackageProjectUrl>https://github.com/2code-it/Tools1.Benchmarking</PackageProjectUrl>
+		<PackageTags>benchmark tools</PackageTags>
+		<RepositoryUrl>https://github.com/2code-it/Tools1.Benchmarking.git</RepositoryUrl>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<Description>Benchmarking tool wich gathers process information running methods/delegates</Description>
+		<PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\..\README.md">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
 
 </Project>

@@ -7,24 +7,14 @@ Tool to run benchmarks
 ```
 	public class Benchmarks
 	{
-		public void Setup()
-		{
-			//optional: setup the benchmark prerequisites
-		}
-
-		public void Cleanup()
-		{
-			//optional: cleanup benchmark
-		}
-
 		public void BenchThis1()
 		{
-			Task.Delay(500).Wait();
+			Task.Delay(100).Wait();
 		}
 
 		public void BenchThis2()
 		{
-			Task.Delay(1000).Wait();
+			Task.Delay(200).Wait();
 		}
 
 		//etc...
@@ -35,15 +25,18 @@ Tool to run benchmarks
 ```
 using Tools1.Benchmarking;
 
-IDictionary<string, List<long>> result = Benchmarker.Run<Benchmarks>(5);
-string[] lines = result.ToDictionary(x => x.Key, x => (int)Math.Round(x.Value.Average()))
-    .Select(x => $"{x.Key}\t{x.Value}")
-    .ToArray();
+Benchmarker benchmarker = Benchmarker.CreateWith(x => { x.InvocationCount = 3; });
+var result = await benchmarker.RunAsync<Benchmarks>();
+string[] lines = result.Select(x => $"{x.Identifier}\t{x.InvocationNumber}\t{x.Duration:N0}").ToArray();
 
 Console.WriteLine(string.Join("\r\n", lines));
 
 ```
 
 ## 3. Output
-BenchThis1  508  
-BenchThis2  1011
+Benchmarks.BenchThis1	1	115,311
+Benchmarks.BenchThis1	2	108,462
+Benchmarks.BenchThis1	3	108,536
+Benchmarks.BenchThis2	1	203,523
+Benchmarks.BenchThis2	2	205,462
+Benchmarks.BenchThis2	3	205,538
