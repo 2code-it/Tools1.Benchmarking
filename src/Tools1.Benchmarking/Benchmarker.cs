@@ -39,7 +39,18 @@ namespace Tools1.Benchmarking
 
 		public bool CanRun(Type type)
 			=> type.IsClass && !type.IsGenericType && type.GetConstructors().Any(x => x.GetParameters().Length == 0);
-	
+
+		public async Task<BenchmarkResult[]> RunAsync(Type[] types, CancellationToken? cancellationToken = null)
+		{
+			List<BenchmarkResult[]> resultsList = new List<BenchmarkResult[]>();
+			foreach(Type type in types)
+			{
+				if(!CanRun(type)) continue;
+				resultsList.Add(await RunAsync(type, cancellationToken));
+			}
+			return resultsList.SelectMany(x=>x).ToArray();
+		}
+
 		public async Task<BenchmarkResult[]> RunAsync(Type type, CancellationToken? cancellationToken = null)
 		{
 			object? source = Activator.CreateInstance(type);

@@ -13,6 +13,7 @@ namespace Tools1.Benchmarking
 		Benchmarker Configure(Action<BenchmarkerOptions> optionsAction);
 
 		Task<BenchmarkResult> RunAsync(Action action, string? identifier = null, int invocationNumber = 1, CancellationToken? cancellationToken = null);
+		Task<BenchmarkResult[]> RunAsync(Type[] types, CancellationToken? cancellationToken = null);
 		Task<BenchmarkResult[]> RunAsync(Type type, CancellationToken? cancellationToken = null);
 		Task<BenchmarkResult[]> RunAsync<T>(CancellationToken? cancellationToken = null);
 	}
