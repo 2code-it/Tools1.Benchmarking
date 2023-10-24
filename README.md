@@ -34,9 +34,9 @@ Console.WriteLine(string.Join("\r\n", lines));
 ```
 
 ## 3. Output
-Benchmarks.BenchThis1	1	115,311
-Benchmarks.BenchThis1	2	108,462
-Benchmarks.BenchThis1	3	108,536
-Benchmarks.BenchThis2	1	203,523
-Benchmarks.BenchThis2	2	205,462
-Benchmarks.BenchThis2	3	205,538
+Benchmarks.BenchThis1	1	115,311 
+Benchmarks.BenchThis1	2	108,462 
+Benchmarks.BenchThis1	3	108,536 
+Benchmarks.BenchThis2	1	203,523 
+Benchmarks.BenchThis2	2	205,462 
+Benchmarks.BenchThis2	3	205,538 
